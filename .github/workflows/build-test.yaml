@@ -22,12 +22,16 @@ jobs:
       FSLPATH: /opt/fsl
       FSLDIR: /opt/fsl
       FSLOUTPUTTYPE: NIFTI_GZ
+      FSLVERSION: 6.0.6.5
 
     steps:
     - name: Cache Ubuntu dependencies
       uses: actions/cache@v3
       with:
-        path: /var/lib/apt
+        path: |
+          /var/lib/apt
+          !/var/lib/apt/lists/partial
+          !/var/lib/apt/lists/lock
         key: apt-cache-v1
         restore-keys: |
           apt-cache-v1
@@ -55,6 +59,7 @@ jobs:
                              libxrandr2 \
                              libxrender1 \
                              libxt6
+        sudo apt-get clean
 
     - name: Cache ANTs install
       uses: actions/cache@v3
@@ -74,18 +79,25 @@ jobs:
     - name: Cache FSL install
       uses: actions/cache@v3
       with:
-        path: /opt/fsl
+        path: $FSLPATH
         key: fsl-v2
         restore-keys: |
           fsl-v2
+
+    # Run with multiple Python versions
+    - name: Setup Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
 
     - name: Install FSL
       run: |
         if [[ ! -d "${FSLPATH}" ]]; then
           sudo mkdir -p $FSLPATH
-          curl -sSL "https://fsl.fmrib.ox.ac.uk/fsldownloads/fsl-6.0.2-centos6_64.tar.gz" | sudo tar -xzC $FSLPATH --strip-components 1
-          sudo bash ${FSLPATH}/etc/fslconf/fslpython_install.sh -f $FSLPATH
+          curl https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/releases/fslinstaller.py -o /tmp/fslinstaller.py -s
+          python /tmp/fslinstaller.py -d ${FSLPATH} -V ${FSLVERSION} -o
           sudo rm -rf ${FSLPATH}/data/atlases
+          rm /tmp/fslinstaller.py
         fi
 
     - name: Checkout GitHub repository
@@ -94,12 +106,6 @@ jobs:
     - name: Install dependencies for headless display
       run: |
         ${{ github.workspace }}/.github/scripts/setup_headless.sh
-
-    # Run with multiple Python versions
-    - name: Setup Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
 
     - name: Install Python requirements
       if: steps.cache.outputs.cache-hit != 'true'
@@ -120,7 +126,7 @@ jobs:
     - name: Run pytest on Jupyter notebooks
       run: |
         export PYTHONPATH=$PYTHONPATH:`realpath ${{ github.workspace }}`
-        export PATH=/opt/fsl/bin:/opt/ants:$PATH
+        export PATH=$FSLPATH/bin:$ANTSPATH:$PATH
         pytest --nbval-lax -v code/introduction.ipynb
         pytest --nbval-lax -v code/preprocessing.ipynb
         pytest --nbval-lax -v code/diffusion_tensor_imaging.ipynb
